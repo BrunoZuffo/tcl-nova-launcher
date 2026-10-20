@@ -1,6 +1,7 @@
 package br.com.tclnova.launcher;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -55,6 +56,7 @@ public final class MainActivity extends Activity {
     private final Map<String, App> appMap = new HashMap<>();
     private LinearLayout content;
     private SharedPreferences preferences;
+    private List<App> cachedApps = Collections.emptyList();
 
     private static final class App {
         final String pkg;
@@ -76,6 +78,7 @@ public final class MainActivity extends Activity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+        cachedApps = loadApps();
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
@@ -85,7 +88,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (preferences != null) render();
+        // Mantem a tela existente ao voltar dos aplicativos: menos trabalho e piscadas.
     }
 
     private int dp(float value) {
@@ -129,10 +132,9 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
-        appMap.clear();
-        List<App> apps = loadApps();
+        List<App> apps = cachedApps;
         FrameLayout frame = new FrameLayout(this);
-        frame.addView(new Backdrop(this), new FrameLayout.LayoutParams(-1, -1));
+        frame.addView(new Backdrop(this, preferences.getInt("theme",0)), new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout scrollRoot = vertical();
         scrollRoot.setPadding(dp(48), dp(30), dp(40), dp(24));
@@ -154,15 +156,15 @@ public final class MainActivity extends Activity {
             .format(Calendar.getInstance().getTime());
         heading.addView(label(date, 14, MUTED, false));
         header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        header.addView(chip("Wi-Fi", Settings.ACTION_WIFI_SETTINGS));
+        header.addView(customizeChip());
         header.addView(chip("Configurações", Settings.ACTION_SETTINGS));
         content.addView(header);
 
-        gap(44);
-        content.addView(label("Sua TV. Seu espaço.", 28, WHITE, true));
-        content.addView(label("Apenas seus aplicativos. Sem banners, anúncios ou assinaturas.",
+        gap(36);
+        content.addView(label("Boa sessão.", 30, WHITE, true));
+        content.addView(label("Sua TV, seus aplicativos. Sem publicidade na tela inicial.",
             13, MUTED, false));
-        gap(38);
+        gap(30);
 
         Set<String> savedFavorites = preferences.getStringSet(FAVS, Collections.emptySet());
         List<App> favorites = new ArrayList<>();
@@ -177,14 +179,53 @@ public final class MainActivity extends Activity {
             gap(24);
         }
 
-        addRow("Todos os aplicativos", apps);
-        gap(36);
+        gap(15);
+        TextView showAll = label(preferences.getBoolean("expanded",false)
+            ? "OCULTAR OUTROS APPS  ▲" : "VER TODOS OS APPS  ▼", 15, WHITE, true);
+        showAll.setFocusable(true);
+        showAll.setPadding(dp(18),dp(14),dp(18),dp(14));
+        showAll.setBackground(rounded(PANEL, 16, false));
+        showAll.setOnClickListener(v -> {
+            preferences.edit().putBoolean("expanded",
+                !preferences.getBoolean("expanded",false)).apply();
+            render();
+        });
+        content.addView(showAll);
+        if(preferences.getBoolean("expanded",false)) {
+            List<App> remaining = new ArrayList<>();
+            Set<String> displayed = new HashSet<>();
+            for (App fav: favorites) displayed.add(fav.pkg);
+            for (App app: apps) if (!displayed.contains(app.pkg)) remaining.add(app);
+            gap(20);
+            addRow("Outros aplicativos", remaining);
+        }
+        gap(30);
         content.addView(label(
             "Dica: segure OK sobre um aplicativo para adicionar ou remover dos favoritos.",
             12, MUTED, false));
         gap(8);
-        content.addView(label("TCL Nova 0.1  •  Interface local  •  Sem rastreamento",
+        content.addView(label("TCL Nova 0.2  •  Personalizado  •  Sem rastreamento",
             11, 0xFFAB9FAA, false));
+    }
+
+    private TextView customizeChip() {
+        TextView chip = label("Personalizar", 13, WHITE, true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(16), 0, dp(16), 0);
+        chip.setFocusable(true);
+        chip.setBackground(rounded(PANEL, 22, false));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(40));
+        params.setMargins(dp(10), 0, 0, 0);
+        chip.setLayoutParams(params);
+        chip.setOnClickListener(v -> new AlertDialog.Builder(this)
+            .setTitle("TCL Nova - personalizar")
+            .setItems(new String[]{"Vinho", "Grafite", "Azul noturno", "Atualizar aplicativos"},
+                (d, selected) -> {
+                    if(selected == 3) cachedApps = loadApps();
+                    else preferences.edit().putInt("theme", selected).apply();
+                    render();
+                }).setNegativeButton("Cancelar",null).show());
+        return chip;
     }
 
     private String greeting() {
@@ -308,6 +349,7 @@ public final class MainActivity extends Activity {
     }
 
     private List<App> loadApps() {
+        appMap.clear();
         PackageManager pm = getPackageManager();
         collectApps(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, true);
         collectApps(pm, Intent.CATEGORY_LAUNCHER, false);
@@ -346,8 +388,10 @@ public final class MainActivity extends Activity {
     private static final class Backdrop extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        Backdrop(Activity context) {
+        private final int theme;
+        Backdrop(Activity context, int theme) {
             super(context);
+            this.theme = theme;
         }
 
         @Override
@@ -355,8 +399,13 @@ public final class MainActivity extends Activity {
             super.onDraw(canvas);
             float w = getWidth();
             float h = getHeight();
+            int[] colors = theme == 1
+                ? new int[]{0xFF292C34, 0xFF1B1E27, 0xFF090B10}
+                : theme == 2
+                ? new int[]{0xFF18406D, 0xFF17233B, 0xFF0C1020}
+                : new int[]{0xFF782A3C, 0xFF271D30, 0xFF0E101C};
             paint.setShader(new LinearGradient(0, 0, w, h,
-                new int[]{0xFF782A3C, 0xFF271D30, 0xFF0E101C},
+                colors,
                 null, Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, paint);
             paint.setShader(new RadialGradient(w * 0.48f, h * 0.12f, w * 0.62f,
