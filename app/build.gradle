@@ -10,12 +10,17 @@ android {
         applicationId 'br.com.tclnova.launcher'
         minSdk 28
         targetSdk 28
-        versionCode 3
-        versionName '0.3.0'
+        versionCode 4
+        versionName '0.4.0'
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // Núcleo pequeno: usado só para gerar QR Code quando solicitado.
+    implementation 'com.google.zxing:core:3.5.3'
 }
