@@ -302,8 +302,8 @@ public final class MainActivity extends Activity {
             favorites.sort(Comparator.comparingInt(a -> positions.containsKey(a.pkg)
                 ? positions.get(a.pkg) : 1000 + priority(a)));
         }
-        if (favorites.isEmpty()) root.addView(txt("Abra a biblioteca para adicionar favoritos.", 14, MUTED, false));
-        else addAppRow(root, favorites, true);
+        // Mesmo sem favoritos, a linha exibe o botao para adicionar aplicativos.
+        addAppRow(root, favorites, true);
 
         space(root, 20);
         boolean expanded = prefs.getBoolean(EXPANDED, false);
@@ -351,7 +351,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addAppRow(LinearLayout root, List<TvApp> apps, boolean favorites) {
-        if (apps.isEmpty()) {
+        if (apps.isEmpty() && !favorites) {
             root.addView(txt("Não há aplicativos nesta seção.", 13, MUTED, false));
             return;
         }
@@ -370,8 +370,86 @@ public final class MainActivity extends Activity {
             if (favorites && firstFavorite == null) firstFavorite = card;
             row.addView(card);
         }
+        if (favorites) {
+            // Sempre no final da fileira principal, inclusive se estiver vazia.
+            View add = createAddFavoriteCard();
+            if (firstFavorite == null) firstFavorite = add;
+            row.addView(add);
+        }
         strip.addView(row);
         root.addView(strip);
+    }
+
+    /** Botao de descoberta na mesma fileira dos favoritos, 100% D-pad. */
+    private View createAddFavoriteCard() {
+        LinearLayout card = vertical();
+        card.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(174), dp(105));
+        lp.rightMargin = dp(13);
+        card.setLayoutParams(lp);
+
+        TextView plus = txt("+", 39, WHITE, false);
+        plus.setGravity(Gravity.CENTER);
+        card.addView(plus, new LinearLayout.LayoutParams(-1, dp(55)));
+        TextView caption = txt("Adicionar app", 13, WHITE, true);
+        caption.setGravity(Gravity.CENTER);
+        card.addView(caption, new LinearLayout.LayoutParams(-1, dp(26)));
+
+        attachFocus(card, "add_favorite", 17, 0xF0231929,
+            this::showAddFavoritePicker, "Adicionar aplicativo aos favoritos");
+        // Mesmo estilo de foco dos cartoes, e titulo central atualizado.
+        card.setOnFocusChangeListener((view, focused) -> {
+            view.setBackground(bg(0xF0231929, 17, focused));
+            view.setElevation(focused ? dp(7) : 0);
+            if (focused) {
+                lastFocus = "add_favorite";
+                if (activeName != null) activeName.setText("Adicionar aplicativo");
+                ensureFocusInView(view);
+            }
+        });
+        return card;
+    }
+
+    /** Seleciona um app comum instalado, sem expor servicos internos do Android. */
+    private void showAddFavoritePicker() {
+        List<TvApp> already = orderedFavorites();
+        Set<String> selected = new HashSet<>();
+        for (TvApp app : already) selected.add(app.pkg);
+        List<TvApp> available = new ArrayList<>();
+        for (TvApp app : cachedApps) {
+            if (!app.internal && !selected.contains(app.pkg)) available.add(app);
+        }
+        if (available.isEmpty()) {
+            new AlertDialog.Builder(this)
+                .setTitle("Adicionar aplicativo")
+                .setMessage("Nao ha outros aplicativos disponiveis. Se instalou um recentemente, atualize a lista em Configuracoes.")
+                .setPositiveButton("OK", null)
+                .show();
+            return;
+        }
+        String[] names = new String[available.size()];
+        for (int i = 0; i < available.size(); i++) names[i] = available.get(i).name;
+        new AlertDialog.Builder(this)
+            .setTitle("Adicionar aos favoritos")
+            .setItems(names, (dialog, which) -> {
+                TvApp chosen = available.get(which);
+                // O metodo ja preserva os favoritos padrao da primeira execucao.
+                toggleFavorite(chosen.pkg);
+                // Manter a ordem existente e inserir o novo aplicativo ao final.
+                StringBuilder order = new StringBuilder();
+                for (TvApp app : already) {
+                    if (order.length() > 0) order.append('|');
+                    order.append(app.pkg);
+                }
+                if (order.length() > 0) order.append('|');
+                order.append(chosen.pkg);
+                prefs.edit().putString(FAV_ORDER, order.toString()).apply();
+                render("add_favorite");
+                Toast.makeText(this, chosen.name + " adicionado aos favoritos",
+                    Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancelar", null)
+            .show();
     }
 
     private View createAppCard(TvApp app) {
